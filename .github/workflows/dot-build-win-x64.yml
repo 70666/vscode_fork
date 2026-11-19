@@ -1,0 +1,75 @@
+name: Build Code OSS for Windows x64
+on:
+  push:
+    branches:
+      - dot/build-win-x64-20261119
+    paths:
+      - .github/workflows/dot-build-win-x64.yml
+permissions:
+  contents: read
+jobs:
+  windows-x64:
+    runs-on: windows-2025
+    timeout-minutes: 100
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      FOUNDRY_LOCAL_SKIP_INSTALL: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .nvmrc
+          architecture: x64
+      - uses: ./.github/actions/setup-pnpm
+      - name: Ensure MSVC Spectre libraries and Windows SDK
+        shell: pwsh
+        run: |
+          $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
+          $vswhere = Join-Path $installer 'vswhere.exe'
+          $components = @(
+            'Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre',
+            'Microsoft.VisualStudio.Component.VC.ATL.Spectre',
+            'Microsoft.VisualStudio.Component.VC.ATLMFC.Spectre'
+          )
+          $vs = & $vswhere -latest -products '*' -version '[17.0,18.0)' -property installationPath
+          if (-not $vs) { throw 'Visual Studio 2022 installation not found' }
+          $ready = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires @components -property installationPath
+          if (-not $ready) {
+            $adds = ($components | ForEach-Object { "--add $_" }) -join ' '
+            $argsLine = "modify --installPath `"$vs`" --quiet --norestart --nocache $adds"
+            $p = Start-Process -FilePath (Join-Path $installer 'setup.exe') -ArgumentList $argsLine -Wait -PassThru
+            if ($p.ExitCode -notin @(0, 3010)) { throw "Visual Studio setup failed: $($p.ExitCode)" }
+            $ready = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires @components -property installationPath
+            if (-not $ready) { throw 'Spectre components are not registered after setup' }
+          }
+          $sdk = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $signtool = Get-ChildItem "$sdk\*\x64\signtool.exe" | Sort-Object { [version]$_.Directory.Parent.Name } -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'Windows SDK x64 signtool.exe not found' }
+          $signtool.DirectoryName >> $env:GITHUB_PATH
+          "vs2022_install=$vs" >> $env:GITHUB_ENV
+          "npm_config_msvs_version=2022" >> $env:GITHUB_ENV
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build Windows x64
+        run: pnpm run gulp vscode-win32-x64-min
+      - name: Verify packaged executable and make portable
+        id: verify
+        shell: pwsh
+        run: |
+          $dir = (Resolve-Path '..\VSCode-win32-x64').Path
+          $exe = Join-Path $dir 'Code - OSS.exe'
+          if (-not (Test-Path $exe)) { throw "Expected executable missing: $exe" }
+          $version = & (Join-Path $dir 'bin\code-oss.cmd') --version
+          if ($LASTEXITCODE -ne 0 -or $version -notcontains 'x64') { throw "Packaged CLI failed version check: $version" }
+          $version | Write-Host
+          $data = New-Item -ItemType Directory -Path (Join-Path $dir 'data') -Force
+          'Portable data stays in this directory.' | Set-Content (Join-Path $data.FullName 'README.txt')
+          "path=$dir" >> $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: Code-OSS-window-routing-win32-x64-portable
+          path: ${{ steps.verify.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
