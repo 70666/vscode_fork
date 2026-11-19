@@ -1,10 +1,19 @@
-# Visual Studio Code - Open Source ("Code - OSS")
+# Code - OSS: Window Routing Fork
+
+This is an independent fork of [microsoft/vscode](https://github.com/microsoft/vscode), distributed as source under the [MIT License](LICENSE.txt).
+
+- **Move tabs between windows.** Dragging a supported, saved local file tab to another window moves it after the destination opens it. Hold Ctrl on Windows/Linux or Option on macOS to copy. Tabs with unsaved changes are not closed automatically.
+- **Open files by extension.** When opening a file from the system, CLI, or native file picker, prefer the most recently focused window with the same extension already open. Explicit new-window requests and requests with mixed extensions keep the upstream behavior. Explorer and Quick Open in the editor are unchanged.
+
+To build from source, follow the [upstream build instructions](https://github.com/microsoft/vscode/wiki/How-to-Contribute#build-and-run). On Windows, if MSBuild reports `MSB8040`, install the matching x64/x86 C++ Spectre-mitigated libraries in Visual Studio Installer.
+
+## Upstream Project
 [![Feature Requests](https://img.shields.io/github/issues/microsoft/vscode/feature-request.svg)](https://github.com/microsoft/vscode/issues?q=is%3Aopen+is%3Aissue+label%3Afeature-request+sort%3Areactions-%2B1-desc)
 [![Bugs](https://img.shields.io/github/issues/microsoft/vscode/bug.svg)](https://github.com/microsoft/vscode/issues?utf8=✓&q=is%3Aissue+is%3Aopen+label%3Abug)
 
 ## The Repository
 
-This repository ("`Code - OSS`") is where we (Microsoft) develop the [Visual Studio Code](https://code.visualstudio.com) product together with the community. Not only do we work on code and issues here, but we also publish our [roadmap](https://github.com/microsoft/vscode/wiki/Roadmap), [monthly iteration plans](https://github.com/microsoft/vscode/wiki/Iteration-Plans), and our [endgame plans](https://github.com/microsoft/vscode/wiki/Running-the-Endgame). This source code is available to everyone under the standard [MIT license](https://github.com/microsoft/vscode/blob/main/LICENSE.txt).
+Microsoft develops [Visual Studio Code](https://code.visualstudio.com) together with the community in the upstream [Code - OSS repository](https://github.com/microsoft/vscode). The upstream project publishes its [roadmap](https://github.com/microsoft/vscode/wiki/Roadmap), [monthly iteration plans](https://github.com/microsoft/vscode/wiki/Iteration-Plans), and [endgame plans](https://github.com/microsoft/vscode/wiki/Running-the-Endgame).
 
 ## Visual Studio Code
 

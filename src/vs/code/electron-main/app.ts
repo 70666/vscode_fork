@@ -691,6 +691,13 @@ export class CodeApplication extends Disposable {
 
 		validatedIpcMain.on('vscode:reloadWindow', event => event.sender.reload());
 
+		validatedIpcMain.on('vscode:updateOpenFileExtensions', (event, extensions: unknown) => {
+			const window = this.windowsMainService?.getWindowByWebContents(event.sender);
+			if (window && Array.isArray(extensions) && extensions.every(extension => typeof extension === 'string' && extension.startsWith('.'))) {
+				window.openFileExtensions = new Set(extensions);
+			}
+		});
+
 		validatedIpcMain.handle('vscode:notifyZoomLevel', async (event, zoomLevel: number | undefined) => {
 			const window = this.windowsMainService?.getWindowByWebContents(event.sender);
 			if (window) {

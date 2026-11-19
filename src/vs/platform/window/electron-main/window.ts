@@ -58,6 +58,7 @@ export interface ICodeWindow extends IBaseWindow {
 	readonly whenClosedOrLoaded: Promise<void>;
 
 	readonly config: INativeWindowConfiguration | undefined;
+	openFileExtensions?: ReadonlySet<string>;
 
 	readonly openedWorkspace?: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier;
 

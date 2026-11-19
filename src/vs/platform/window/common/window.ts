@@ -5,9 +5,10 @@
 
 import { VSBuffer } from '../../../base/common/buffer.js';
 import { IStringDictionary } from '../../../base/common/collections.js';
-import { AGENTS_AUTHORITY } from '../../../base/common/network.js';
+import { AGENTS_AUTHORITY, Schemas } from '../../../base/common/network.js';
 import { PerformanceMark } from '../../../base/common/performance.js';
 import { isMacintosh, isNative, isTahoeOrNewer, isWeb } from '../../../base/common/platform.js';
+import { extUri } from '../../../base/common/resources.js';
 import { URI, UriComponents, UriDto } from '../../../base/common/uri.js';
 import { ISandboxConfiguration } from '../../../base/parts/sandbox/common/sandboxTypes.js';
 import { IConfigurationService } from '../../configuration/common/configuration.js';
@@ -554,6 +555,15 @@ export interface IOpenFileRequest {
 export interface INativeOpenFileRequest extends IOpenFileRequest {
 	readonly termProgram?: string;
 	readonly filesToWait?: IPathsToWaitForData;
+	readonly preferredFileExtension?: string;
+}
+
+export function getWindowFileExtension(resource: URI | undefined): string | undefined {
+	if (resource?.scheme === Schemas.file || resource?.scheme === Schemas.vscodeRemote) {
+		const extension = extUri.extname(resource).toLowerCase();
+		return extension.length > 1 ? extension : undefined;
+	}
+	return undefined;
 }
 
 export interface INativeRunActionInWindowRequest {

@@ -41,6 +41,7 @@ export const CodeDataTransfers = {
 
 export interface IDraggedResourceEditorInput extends IBaseTextResourceEditorInput {
 	resource: URI | undefined;
+	moveToken?: string;
 
 	/**
 	 * A hint that the source of the dragged editor input

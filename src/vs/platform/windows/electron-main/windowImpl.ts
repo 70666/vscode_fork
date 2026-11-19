@@ -734,6 +734,7 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 }
 
 export class CodeWindow extends BaseWindow implements ICodeWindow {
+	openFileExtensions?: ReadonlySet<string>;
 
 	//#region Events
 
@@ -1345,6 +1346,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 	}
 
 	load(configuration: INativeWindowConfiguration, options: ILoadOptions = Object.create(null)): void {
+		this.openFileExtensions = undefined;
 		this.logService.trace(`window#load: attempt to load window (id: ${this._id})`);
 
 		// Clear Document Edited if needed

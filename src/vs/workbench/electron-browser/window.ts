@@ -10,10 +10,10 @@ import { equals } from '../../base/common/objects.js';
 import { EventType, EventHelper, addDisposableListener, ModifierKeyEmitter, getActiveElement, hasWindow, getWindowById, getWindows, $ } from '../../base/browser/dom.js';
 import { Action, Separator, WorkbenchActionExecutedClassification, WorkbenchActionExecutedEvent } from '../../base/common/actions.js';
 import { IFileService } from '../../platform/files/common/files.js';
-import { EditorResourceAccessor, IUntitledTextResourceEditorInput, SideBySideEditor, pathsToEditors, IResourceDiffEditorInput, IUntypedEditorInput, IEditorPane, isResourceEditorInput, IResourceMergeEditorInput } from '../common/editor.js';
+import { EditorResourceAccessor, EditorsOrder, GroupModelChangeKind, IUntitledTextResourceEditorInput, SideBySideEditor, pathsToEditors, IResourceDiffEditorInput, IUntypedEditorInput, IEditorPane, isResourceEditorInput, IResourceMergeEditorInput } from '../common/editor.js';
 import { IEditorService } from '../services/editor/common/editorService.js';
 import { ITelemetryService } from '../../platform/telemetry/common/telemetry.js';
-import { WindowMinimumSize, IOpenFileRequest, IAddRemoveFoldersRequest, INativeRunActionInWindowRequest, INativeRunKeybindingInWindowRequest, INativeOpenFileRequest, hasNativeTitlebar } from '../../platform/window/common/window.js';
+import { WindowMinimumSize, IAddRemoveFoldersRequest, INativeRunActionInWindowRequest, INativeRunKeybindingInWindowRequest, INativeOpenFileRequest, getWindowFileExtension, hasNativeTitlebar } from '../../platform/window/common/window.js';
 import { ITitleService } from '../services/title/browser/titleService.js';
 import { IWorkbenchThemeService } from '../services/themes/common/workbenchThemeService.js';
 import { ApplyZoomTarget, applyZoom } from '../../platform/window/electron-browser/window.js';
@@ -57,7 +57,7 @@ import { IFilesConfigurationService } from '../services/filesConfiguration/commo
 import { Event } from '../../base/common/event.js';
 import { IRemoteAuthorityResolverService } from '../../platform/remote/common/remoteAuthorityResolver.js';
 import { IAddressProvider, IAddress } from '../../platform/remote/common/remoteAgentConnection.js';
-import { IEditorGroupsService, IEditorPart } from '../services/editor/common/editorGroupsService.js';
+import { GroupsOrder, IEditorGroup, IEditorGroupsService, IEditorPart } from '../services/editor/common/editorGroupsService.js';
 import { IDialogService } from '../../platform/dialogs/common/dialogs.js';
 import { AuthInfo } from '../../base/parts/sandbox/electron-browser/electronTypes.js';
 import { ILogService } from '../../platform/log/common/log.js';
@@ -149,6 +149,17 @@ export class NativeWindow extends BaseWindow {
 	}
 
 	protected registerListeners(): void {
+		const reportOpenFileExtensions = this._register(new RunOnceScheduler(() => {
+			const extensions = new Set(coalesce(this.editorService.getEditors(EditorsOrder.SEQUENTIAL).map(({ editor }) => getWindowFileExtension(editor.resource))));
+			ipcRenderer.send('vscode:updateOpenFileExtensions', [...extensions]);
+		}, 0));
+		this._register(this.editorService.onDidEditorsChange(({ event }) => {
+			if (event.kind === GroupModelChangeKind.EDITOR_OPEN || event.kind === GroupModelChangeKind.EDITOR_CLOSE) {
+				reportOpenFileExtensions.schedule();
+			}
+		}));
+		this._register(Event.any(this.editorGroupService.onDidAddGroup, this.editorGroupService.onDidRemoveGroup)(() => reportOpenFileExtensions.schedule()));
+		reportOpenFileExtensions.schedule();
 
 		// Layout
 		this._register(addDisposableListener(mainWindow, EventType.RESIZE, () => this.layoutService.layout()));
@@ -221,7 +232,7 @@ export class NativeWindow extends BaseWindow {
 		});
 
 		// Support openFiles event for existing and new files
-		ipcRenderer.on('vscode:openFiles', (event: unknown, ...argsRaw: unknown[]) => { this.onOpenFiles(argsRaw[0] as IOpenFileRequest); });
+		ipcRenderer.on('vscode:openFiles', (event: unknown, ...argsRaw: unknown[]) => { this.onOpenFiles(argsRaw[0] as INativeOpenFileRequest); });
 
 		// Support addRemoveFolders event for workspace management
 		ipcRenderer.on('vscode:addRemoveFolders', (event: unknown, ...argsRaw: unknown[]) => this.onAddRemoveFoldersRequest(argsRaw[0] as IAddRemoveFoldersRequest));
@@ -1073,7 +1084,14 @@ export class NativeWindow extends BaseWindow {
 
 		const inputs = coalesce(await pathsToEditors(mergeMode ? request.filesToMerge : diffMode ? request.filesToDiff : request.filesToOpenOrCreate, this.fileService, this.logService));
 		if (inputs.length) {
-			const openedEditorPanes = await this.openResources(inputs, diffMode, mergeMode);
+			const extension = request.preferredFileExtension;
+			const targetGroup = extension ? this.editorGroupService.getGroups(GroupsOrder.MOST_RECENTLY_ACTIVE)
+				.find(group => group.editors.some(editor => getWindowFileExtension(editor.resource) === extension)) : undefined;
+			const openedEditorPanes = await this.openResources(inputs, diffMode, mergeMode, targetGroup);
+			const targetWindow = targetGroup && getWindowById(targetGroup.windowId);
+			if (targetWindow && openedEditorPanes.length) {
+				await this.hostService.focus(targetWindow.window);
+			}
 
 			if (request.filesToWait) {
 
@@ -1107,7 +1125,7 @@ export class NativeWindow extends BaseWindow {
 		}
 	}
 
-	private async openResources(resources: Array<IResourceEditorInput | IUntitledTextResourceEditorInput>, diffMode: boolean, mergeMode: boolean): Promise<readonly IEditorPane[]> {
+	private async openResources(resources: Array<IResourceEditorInput | IUntitledTextResourceEditorInput>, diffMode: boolean, mergeMode: boolean, targetGroup?: IEditorGroup): Promise<readonly IEditorPane[]> {
 		const editors: IUntypedEditorInput[] = [];
 
 		if (mergeMode && isResourceEditorInput(resources[0]) && isResourceEditorInput(resources[1]) && isResourceEditorInput(resources[2]) && isResourceEditorInput(resources[3])) {
@@ -1130,7 +1148,7 @@ export class NativeWindow extends BaseWindow {
 			editors.push(...resources);
 		}
 
-		return this.editorService.openEditors(editors, undefined, { validateTrust: true });
+		return this.editorService.openEditors(editors, targetGroup, { validateTrust: true });
 	}
 
 	//#region Window Zoom

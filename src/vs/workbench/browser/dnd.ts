@@ -12,13 +12,16 @@ import { IListDragAndDrop } from '../../base/browser/ui/list/list.js';
 import { ElementsDragAndDropData, ListViewTargetSector } from '../../base/browser/ui/list/listView.js';
 import { ITreeDragOverReaction } from '../../base/browser/ui/tree/tree.js';
 import { coalesce } from '../../base/common/arrays.js';
+import { disposableTimeout } from '../../base/common/async.js';
+import { Lazy } from '../../base/common/lazy.js';
 import { UriList, VSDataTransfer } from '../../base/common/dataTransfer.js';
 import { Emitter, Event } from '../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, markAsSingleton, toDisposable } from '../../base/common/lifecycle.js';
 import { stringify } from '../../base/common/marshalling.js';
 import { Mimes } from '../../base/common/mime.js';
 import { FileAccess, Schemas } from '../../base/common/network.js';
-import { isMacintosh, isWindows } from '../../base/common/platform.js';
+import { isMacintosh, isWeb, isWindows } from '../../base/common/platform.js';
+import { generateUuid } from '../../base/common/uuid.js';
 import { basename, isEqual } from '../../base/common/resources.js';
 import { URI } from '../../base/common/uri.js';
 import { CodeDataTransfers, Extensions, IDragAndDropContributionRegistry, IDraggedResourceEditorInput, IResourceStat, LocalSelectionTransfer, createDraggedEditorInputFromRawResourcesData, extractEditorsAndFilesDropData } from '../../platform/dnd/browser/dnd.js';
@@ -30,8 +33,8 @@ import { Registry } from '../../platform/registry/common/platform.js';
 import { IRectangle, IWindowOpenable } from '../../platform/window/common/window.js';
 import { IWorkspaceContextService, hasWorkspaceFileExtension, isTemporaryWorkspace } from '../../platform/workspace/common/workspace.js';
 import { IWorkspaceFolderCreationData, IWorkspacesService } from '../../platform/workspaces/common/workspaces.js';
-import { EditorResourceAccessor, GroupIdentifier, IEditorIdentifier, isEditorIdentifier, isResourceDiffEditorInput, isResourceMergeEditorInput, isResourceSideBySideEditorInput } from '../common/editor.js';
-import { IEditorGroup } from '../services/editor/common/editorGroupsService.js';
+import { EditorResourceAccessor, EditorsOrder, GroupIdentifier, IEditorIdentifier, isEditorIdentifier, isResourceDiffEditorInput, isResourceMergeEditorInput, isResourceSideBySideEditorInput } from '../common/editor.js';
+import { IEditorGroup, IEditorGroupsService } from '../services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../services/editor/common/editorService.js';
 import { IHostService } from '../services/host/browser/host.js';
 import { ITextFileService } from '../services/textfile/common/textfiles.js';
@@ -334,6 +337,13 @@ export class DraggedEditorIdentifier {
 	constructor(readonly identifier: IEditorIdentifier) { }
 }
 
+const editorDropConfirmation = new Lazy(() => new BroadcastDataChannel<string>('vscode.editorDropConfirmation'));
+const editorMoveDataType = 'application/vnd.code.editor-move';
+
+export function getCrossWindowEditorDropEffect(event: DragEvent): 'move' | 'copy' {
+	return event.dataTransfer?.types.includes(editorMoveDataType) && !(isMacintosh ? event.altKey : event.ctrlKey) ? 'move' : 'copy';
+}
+
 export class DraggedEditorGroupIdentifier {
 
 	constructor(readonly identifier: GroupIdentifier) { }
@@ -425,7 +435,7 @@ export class ResourcesDropHandler {
 
 		// Open in Editor
 		const targetGroup = resolveTargetGroup?.();
-		await this.editorService.openEditors(editors.map(editor => ({
+		const openedPanes = await this.editorService.openEditors(editors.map(editor => ({
 			...editor,
 			resource: editor.resource,
 			options: {
@@ -434,6 +444,13 @@ export class ResourcesDropHandler {
 				pinned: true
 			}
 		})), targetGroup, { validateTrust: true });
+		if (!(isMacintosh ? event.altKey : event.ctrlKey)) {
+			for (const editor of editors) {
+				if (editor.moveToken && openedPanes.some(pane => pane.group.contains(editor))) {
+					editorDropConfirmation.value.postData(editor.moveToken);
+				}
+			}
+		}
 
 		// Finish with provided function
 		afterDrop?.(targetGroup);
@@ -490,8 +507,8 @@ export class ResourcesDropHandler {
 
 export function fillEditorsDragData(accessor: ServicesAccessor, resources: URI[], event: DragMouseEvent | DragEvent, options?: { disableStandardTransfer: boolean }): void;
 export function fillEditorsDragData(accessor: ServicesAccessor, resources: IResourceStat[], event: DragMouseEvent | DragEvent, options?: { disableStandardTransfer: boolean }): void;
-export function fillEditorsDragData(accessor: ServicesAccessor, editors: IEditorIdentifier[], event: DragMouseEvent | DragEvent, options?: { disableStandardTransfer: boolean }): void;
-export function fillEditorsDragData(accessor: ServicesAccessor, resourcesOrEditors: Array<URI | IResourceStat | IEditorIdentifier>, event: DragMouseEvent | DragEvent, options?: { disableStandardTransfer: boolean }): void {
+export function fillEditorsDragData(accessor: ServicesAccessor, editors: IEditorIdentifier[], event: DragMouseEvent | DragEvent, options?: { disableStandardTransfer: boolean; moveAcrossWindows?: boolean }): void;
+export function fillEditorsDragData(accessor: ServicesAccessor, resourcesOrEditors: Array<URI | IResourceStat | IEditorIdentifier>, event: DragMouseEvent | DragEvent, options?: { disableStandardTransfer: boolean; moveAcrossWindows?: boolean }): void {
 	if (resourcesOrEditors.length === 0 || !event.dataTransfer) {
 		return;
 	}
@@ -559,6 +576,7 @@ export function fillEditorsDragData(accessor: ServicesAccessor, resourcesOrEdito
 	// Editors: enables cross window DND of editors
 	// into the editor area while presering UI state
 	const draggedEditors: IDraggedResourceEditorInput[] = [];
+	const pendingMoves = new Map<string, IEditorIdentifier>();
 
 	for (const resourceOrEditor of resourcesOrEditors) {
 
@@ -568,6 +586,10 @@ export function fillEditorsDragData(accessor: ServicesAccessor, resourcesOrEdito
 			const untypedEditor = resourceOrEditor.editor.toUntyped({ preserveViewState: resourceOrEditor.groupId });
 			if (untypedEditor) {
 				editor = { ...untypedEditor, resource: EditorResourceAccessor.getCanonicalUri(untypedEditor) };
+				if (!isWeb && options?.moveAcrossWindows && editor.resource?.scheme === Schemas.file && !resourceOrEditor.editor.isDirty()) {
+					editor.moveToken = generateUuid();
+					pendingMoves.set(editor.moveToken, resourceOrEditor);
+				}
 			}
 		} else if (URI.isUri(resourceOrEditor)) {
 			const { selection, uri } = extractSelection(resourceOrEditor);
@@ -638,6 +660,29 @@ export function fillEditorsDragData(accessor: ServicesAccessor, resourcesOrEdito
 
 	if (draggedEditors.length) {
 		event.dataTransfer.setData(CodeDataTransfers.EDITORS, stringify(draggedEditors));
+	}
+
+	if (pendingMoves.size) {
+		if (pendingMoves.size === draggedEditors.length) {
+			event.dataTransfer.setData(editorMoveDataType, 'true');
+		}
+		const groupsService = accessor.get(IEditorGroupsService);
+		const confirmation = new DisposableStore();
+		confirmation.add(editorDropConfirmation.value.onDidReceiveData(token => {
+			const source = pendingMoves.get(token);
+			if (!source) {
+				return;
+			}
+			pendingMoves.delete(token);
+			if (!pendingMoves.size) {
+				confirmation.dispose();
+			}
+			const group = groupsService.getGroup(source.groupId);
+			if (!source.editor.isDirty() && group?.getEditors(EditorsOrder.SEQUENTIAL).includes(source.editor)) {
+				void group.closeEditor(source.editor, { preserveFocus: true });
+			}
+		}));
+		disposableTimeout(() => confirmation.dispose(), 120000, confirmation);
 	}
 
 	// Add a URI list entry

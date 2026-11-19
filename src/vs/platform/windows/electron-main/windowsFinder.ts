@@ -41,6 +41,19 @@ export async function findWindowOnFile(windows: ICodeWindow[], fileUri: URI, loc
 	return undefined;
 }
 
+export function findWindowOnFileExtension(windows: readonly ICodeWindow[], extension: string): ICodeWindow | undefined {
+	let mostRecent: ICodeWindow | undefined;
+	for (const window of windows) {
+		if (window.isExtensionDevelopmentHost || window.config?.isSessionsWindow || !window.openFileExtensions?.has(extension)) {
+			continue;
+		}
+		if (!mostRecent || window.lastFocusTime > mostRecent.lastFocusTime) {
+			mostRecent = window;
+		}
+	}
+	return mostRecent;
+}
+
 export function findWindowOnWorkspaceOrFolder(windows: ICodeWindow[], folderOrWorkspaceConfigUri: URI): ICodeWindow | undefined {
 
 	for (const window of windows) {

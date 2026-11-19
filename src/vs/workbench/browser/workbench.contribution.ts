@@ -980,7 +980,7 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 				'enum': ['on', 'off', 'default'],
 				'enumDescriptions': [
 					localize('window.openFilesInNewWindow.on', "Files will open in a new window."),
-					localize('window.openFilesInNewWindow.off', "Files will open in the window with the files' folder open or the last active window."),
+					localize('window.openFilesInNewWindow.off', "Files with the same extension open in a window that already has that extension open, when possible. Otherwise, the window with the files' folder open or the last active window is used."),
 					isMacintosh ?
 						localize('window.openFilesInNewWindow.defaultMac', "Files will open in the window with the files' folder open or the last active window unless opened via the Dock or from Finder.") :
 						localize('window.openFilesInNewWindow.default', "Files will open in a new window unless picked from within the application (e.g. via the File menu).")

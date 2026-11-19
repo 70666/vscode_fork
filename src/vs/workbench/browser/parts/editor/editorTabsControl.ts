@@ -575,7 +575,7 @@ export abstract class EditorTabsControl extends Themable implements IEditorTabsC
 
 	protected doFillResourceDataTransfers(editors: readonly EditorInput[], e: DragEvent, disableStandardTransfer: boolean): boolean {
 		if (editors.length) {
-			this.instantiationService.invokeFunction(fillEditorsDragData, editors.map(editor => ({ editor, groupId: this.groupView.id })), e, { disableStandardTransfer });
+			this.instantiationService.invokeFunction(fillEditorsDragData, editors.map(editor => ({ editor, groupId: this.groupView.id })), e, { disableStandardTransfer, moveAcrossWindows: true });
 
 			return true;
 		}

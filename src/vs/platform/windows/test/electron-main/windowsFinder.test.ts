@@ -11,9 +11,9 @@ import { extUriBiasedIgnorePathCase } from '../../../../base/common/resources.js
 import { URI, UriDto } from '../../../../base/common/uri.js';
 import { ICommandAction } from '../../../action/common/action.js';
 import { NativeParsedArgs } from '../../../environment/common/argv.js';
-import { INativeWindowConfiguration } from '../../../window/common/window.js';
+import { getWindowFileExtension, INativeWindowConfiguration } from '../../../window/common/window.js';
 import { ICodeWindow, ILoadEvent, IWindowState } from '../../../window/electron-main/window.js';
-import { findWindowOnFile, findWindowOnRequestedPath } from '../../electron-main/windowsFinder.js';
+import { findWindowOnFile, findWindowOnFileExtension, findWindowOnRequestedPath } from '../../electron-main/windowsFinder.js';
 import { toWorkspaceFolders } from '../../../workspaces/common/workspaces.js';
 import { IWorkspaceIdentifier } from '../../../workspace/common/workspace.js';
 import { FileAccess } from '../../../../base/common/network.js';
@@ -23,6 +23,27 @@ import { FocusMode, IApplicationBadge } from '../../../native/common/native.js';
 suite('WindowsFinder', () => {
 
 	const fixturesFolder = FileAccess.asFileUri('vs/platform/windows/test/electron-main/fixtures').fsPath;
+
+	test('file extension routing selects the most recent matching window, not the most recent overall', () => {
+		const olderMatch = createTestCodeWindow({ lastFocusTime: 1 });
+		olderMatch.openFileExtensions = new Set(['.ts']);
+		const newerMatch = createTestCodeWindow({ lastFocusTime: 2 });
+		newerMatch.openFileExtensions = new Set(['.js', '.ts']);
+		const nonMatch = createTestCodeWindow({ lastFocusTime: 3 });
+		nonMatch.openFileExtensions = new Set(['.md']);
+		const windows = [nonMatch, olderMatch, newerMatch];
+
+		assert.strictEqual(findWindowOnFileExtension(windows, getWindowFileExtension(URI.file('/project/file.TS'))!), newerMatch);
+		assert.strictEqual(findWindowOnFileExtension(windows, '.json'), undefined);
+		newerMatch.openFileExtensions = new Set(['.js']);
+		assert.strictEqual(findWindowOnFileExtension(windows, '.ts'), olderMatch);
+	});
+
+	test('files without an extension and virtual editors are not routed', () => {
+		assert.strictEqual(getWindowFileExtension(URI.file('/project/.gitignore')), undefined);
+		assert.strictEqual(getWindowFileExtension(URI.file('/project/README')), undefined);
+		assert.strictEqual(getWindowFileExtension(URI.parse('untitled:/draft.ts')), undefined);
+	});
 
 	const testWorkspace: IWorkspaceIdentifier = {
 		id: Date.now().toString(),

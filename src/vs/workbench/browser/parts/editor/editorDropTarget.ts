@@ -19,7 +19,7 @@ import { activeContrastBorder } from '../../../../platform/theme/common/colorReg
 import { IThemeService, Themable } from '../../../../platform/theme/common/themeService.js';
 import { isTemporaryWorkspace, IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { CodeDataTransfers, containsDragType, Extensions as DragAndDropExtensions, IDragAndDropContributionRegistry, LocalSelectionTransfer } from '../../../../platform/dnd/browser/dnd.js';
-import { DraggedEditorGroupIdentifier, DraggedEditorIdentifier, extractTreeDropData, InputDropTargetHints, isContentDropTarget, isInputDropTarget, isPassThroughModifierHeld, PASS_THROUGH_MODIFIER_LABEL, registerPassThroughDropTarget, ResourcesDropHandler } from '../../dnd.js';
+import { DraggedEditorGroupIdentifier, DraggedEditorIdentifier, extractTreeDropData, getCrossWindowEditorDropEffect, InputDropTargetHints, isContentDropTarget, isInputDropTarget, isPassThroughModifierHeld, PASS_THROUGH_MODIFIER_LABEL, registerPassThroughDropTarget, ResourcesDropHandler } from '../../dnd.js';
 import { DEFAULT_EDITOR_MIN_DIMENSIONS, GroupTransferKind, IEditorGroupsView, IEditorGroupView, prepareMoveCopyEditors } from './editor.js';
 import { EditorInputCapabilities, IEditorIdentifier, IUntypedEditorInput } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
@@ -348,10 +348,8 @@ class DropOverlay extends Themable {
 			return;
 		}
 
-		// Update the dropEffect to "copy" if there is no local data to be dragged because
-		// in that case we can only copy the data into and not move it from its source
 		if (!isDraggingEditor && !isDraggingGroup && e.dataTransfer) {
-			e.dataTransfer.dropEffect = 'copy';
+			e.dataTransfer.dropEffect = getCrossWindowEditorDropEffect(e);
 		}
 
 		// Find out if operation is valid

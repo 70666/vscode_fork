@@ -37,10 +37,10 @@ import product from '../../product/common/product.js';
 import { IProtocolMainService } from '../../protocol/electron-main/protocol.js';
 import { getRemoteAuthority } from '../../remote/common/remoteHosts.js';
 import { IStateService } from '../../state/node/state.js';
-import { AgentsWindowOpenSource, IAgentsWindowDraft, IAddRemoveFoldersRequest, INativeOpenFileRequest, INativeWindowConfiguration, IOpenEmptyWindowOptions, IPath, IPathsToWaitFor, isFileToOpen, isFolderToOpen, isWorkspaceToOpen, IWindowFolderLocation, IWindowOpenable, IWindowSettings } from '../../window/common/window.js';
+import { AgentsWindowOpenSource, getWindowFileExtension, IAgentsWindowDraft, IAddRemoveFoldersRequest, INativeOpenFileRequest, INativeWindowConfiguration, IOpenEmptyWindowOptions, IPath, IPathsToWaitFor, isFileToOpen, isFolderToOpen, isWorkspaceToOpen, IWindowFolderLocation, IWindowOpenable, IWindowSettings } from '../../window/common/window.js';
 import { CodeWindow } from './windowImpl.js';
 import { IOpenConfiguration, IOpenEmptyConfiguration, IWindowsCountChangedEvent, IWindowsMainService, OpenContext, getLastFocused } from './windows.js';
-import { findWindowOnExtensionDevelopmentPath, findWindowOnFile, findWindowOnRequestedPath, findWindowOnWorkspaceOrFolder } from './windowsFinder.js';
+import { findWindowOnExtensionDevelopmentPath, findWindowOnFile, findWindowOnFileExtension, findWindowOnRequestedPath, findWindowOnWorkspaceOrFolder } from './windowsFinder.js';
 import { IFolderLocationsMainService, IValidatedFolderLocation } from './folderLocationsMainService.js';
 import { IWindowState, WindowsStateHandler } from './windowsStateHandler.js';
 import { IRecent } from '../../workspaces/common/workspaces.js';
@@ -627,8 +627,17 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			// in case `openFilesInNewWindow` is enforced, we skip
 			// this step.
 			let windowToUseForFiles: ICodeWindow | undefined = undefined;
+			let preferredFileExtension: string | undefined;
 			if (fileToCheck?.fileUri && !openFilesInNewWindow) {
-				if (openConfig.context === OpenContext.DESKTOP || openConfig.context === OpenContext.CLI || openConfig.context === OpenContext.DOCK || openConfig.context === OpenContext.LINK) {
+				if (!openConfig.forceReuseWindow && !openConfig.forceProfile && !openConfig.forceTempProfile && !openConfig.cli.extensionDevelopmentPath && openConfig.context !== OpenContext.API && filesToOpen.filesToOpenOrCreate.length > 0) {
+					const extension = getWindowFileExtension(fileToCheck.fileUri);
+					if (extension && filesToOpen.filesToOpenOrCreate.every(file => getWindowFileExtension(file.fileUri) === extension)) {
+						windowToUseForFiles = findWindowOnFileExtension(windows, extension);
+						preferredFileExtension = windowToUseForFiles ? extension : undefined;
+					}
+				}
+
+				if (!windowToUseForFiles && (openConfig.context === OpenContext.DESKTOP || openConfig.context === OpenContext.CLI || openConfig.context === OpenContext.DOCK || openConfig.context === OpenContext.LINK)) {
 					windowToUseForFiles = await findWindowOnFile(windows, fileToCheck.fileUri, async workspace => workspace.configPath.scheme === Schemas.file ? this.workspacesManagementMainService.resolveLocalWorkspace(workspace.configPath) : undefined);
 				}
 
@@ -638,7 +647,9 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			}
 
 			// We found a window to open the files in
-			if (windowToUseForFiles) {
+			if (windowToUseForFiles && preferredFileExtension) {
+				addUsedWindow(this.doOpenFilesInExistingWindow(openConfig, windowToUseForFiles, filesToOpen, preferredFileExtension), true);
+			} else if (windowToUseForFiles) {
 
 				// Window is workspace
 				if (isWorkspaceIdentifier(windowToUseForFiles.openedWorkspace)) {
@@ -762,7 +773,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		return { windows: distinct(usedWindows), filesOpenedInWindow };
 	}
 
-	private doOpenFilesInExistingWindow(configuration: IOpenConfiguration, window: ICodeWindow, filesToOpen?: IFilesToOpen): ICodeWindow {
+	private doOpenFilesInExistingWindow(configuration: IOpenConfiguration, window: ICodeWindow, filesToOpen?: IFilesToOpen, preferredFileExtension?: string): ICodeWindow {
 		this.logService.trace('windowsManager#doOpenFilesInExistingWindow', { filesToOpen });
 
 		this.focusMainOrChildWindow(window); // make sure window or any of the children has focus
@@ -772,6 +783,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			filesToDiff: filesToOpen?.filesToDiff,
 			filesToMerge: filesToOpen?.filesToMerge,
 			filesToWait: filesToOpen?.filesToWait,
+			preferredFileExtension,
 			termProgram: configuration?.userEnv?.['TERM_PROGRAM']
 		};
 		window.sendWhenReady('vscode:openFiles', CancellationToken.None, params);
