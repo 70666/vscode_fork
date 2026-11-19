@@ -9,7 +9,7 @@ permissions:
   contents: read
 jobs:
   windows-x64:
-    runs-on: windows-2025
+    runs-on: windows-2022
     timeout-minutes: 100
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
@@ -52,6 +52,8 @@ jobs:
           "npm_config_msvs_version=2022" >> $env:GITHUB_ENV
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
+      - name: Fetch built-in extensions
+        run: pnpm run download-builtin-extensions
       - name: Build Windows x64
         run: pnpm run gulp vscode-win32-x64-min
       - name: Verify packaged executable and make portable
@@ -71,5 +73,42 @@ jobs:
         with:
           name: Code-OSS-window-routing-win32-x64-portable
           path: ${{ steps.verify.outputs.path }}
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+  release:
+    needs: windows-x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download and publish verified portable package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SOURCE: cae5715d7317440355591ad2b2fe1c5e326b0f81
+          TAG: v1.148.0-window-routing.1
+          ASSET: Code-OSS-1.148.0-window-routing-win32-x64-portable.zip
+        run: |
+          set -euo pipefail
+          gh run download "$RUN_ID" -R "$REPO" -n Code-OSS-window-routing-win32-x64-portable -D portable
+          test -s 'portable/Code - OSS.exe'
+          test -f 'portable/data/README.txt'
+          (cd portable && zip -qr "../$ASSET" .)
+          unzip -tq "$ASSET"
+          sha256sum "$ASSET" > SHA256SUMS.txt
+          cat > release-notes.md <<'EOF'
+          Windows x64 portable build of the Code - OSS Window Routing Fork. Extract the ZIP and open `Code - OSS.exe`. The `data` folder keeps settings and extensions with the app.
+          
+          - Move supported file tabs between windows and route file opens by extension.
+          - This fork build is not Microsoft-signed. The build pipeline verifies the packaged CLI with `--version`; GUI behavior was not tested in CI.
+          - `SHA256SUMS.txt` lists the SHA-256 checksum of the ZIP.
+          EOF
+          printf '\nSource: %s\nBuild: https://github.com/%s/actions/runs/%s\n' "$SOURCE" "$REPO" "$RUN_ID" >> release-notes.md
+          gh release create "$TAG" -R "$REPO" --target "$SOURCE" --title 'Code - OSS Window Routing 1.148.0 · Windows x64' --notes-file release-notes.md --draft "$ASSET" SHA256SUMS.txt
+          gh release edit "$TAG" -R "$REPO" --draft=false
+          gh release view "$TAG" -R "$REPO" --json url,isDraft,assets
